@@ -1,0 +1,191 @@
+#include <Servo.h>
+#include <Wire.h>
+#include <MPU6050_light.h>
+
+/* ---------- Ultrasonic + Servo ---------- */
+const int trigPin = 13;
+const int echoPin = 12;
+const int servoPin = 11;
+
+Servo myServo;
+
+long duration;
+int distance;
+
+bool triggered = false;
+bool at90 = false;
+
+int servoPos0 = 0;
+int servoPos90 = 90;
+const int triggerDistance = 100; // cm
+
+/* ---------- MPU6050 ---------- */
+MPU6050 mpu(Wire);
+unsigned long timer = 0;
+
+float initialRoll = 0;
+float initialPitch = 0;
+
+/* ---------- Motor A (Pitch Correction) ---------- */
+const int MA_EN = 3;
+const int MA_IN1 = 2;
+const int MA_IN2 = 4;
+
+/* ---------- Motor B & C (Roll Correction) ---------- */
+const int MB_EN = 10;
+const int MB_IN1 = 9;
+const int MB_IN2 = 8;
+
+const int MC_EN = 5;
+const int MC_IN3 = 7;
+const int MC_IN4 = 6;
+
+void setup() {
+  // Ultrasonic
+  pinMode(trigPin, OUTPUT);
+  pinMode(echoPin, INPUT);
+
+  // Servo
+  myServo.attach(servoPin);
+  myServo.write(servoPos0);
+
+  // Motors
+  pinMode(MA_EN, OUTPUT);
+  pinMode(MA_IN1, OUTPUT);
+  pinMode(MA_IN2, OUTPUT);
+
+  pinMode(MB_EN, OUTPUT);
+  pinMode(MB_IN1, OUTPUT);
+  pinMode(MB_IN2, OUTPUT);
+
+  pinMode(MC_EN, OUTPUT);
+  pinMode(MC_IN3, OUTPUT);
+  pinMode(MC_IN4, OUTPUT);
+
+  // Stop all motors initially
+  analogWrite(MA_EN, 0);
+  analogWrite(MB_EN, 0);
+  analogWrite(MC_EN, 0);
+
+  // Serial & I2C
+  Serial.begin(115200);
+  Wire.begin();
+
+  // MPU6050 init
+  if (mpu.begin() != 0) {
+    Serial.println("MPU6050 not connected!");
+    while (1);
+  }
+
+  Serial.println("Calibrating MPU6050... Keep it still");
+  delay(1000);
+  mpu.calcGyroOffsets();
+  Serial.println("Calibration done!");
+
+  // Let MPU stabilize
+  delay(1000);
+  mpu.update();
+
+  // Store initial orientation
+  initialRoll = mpu.getAngleX();
+  initialPitch = mpu.getAngleY();
+
+  Serial.print("Initial Roll: ");
+  Serial.println(initialRoll);
+  Serial.print("Initial Pitch: ");
+  Serial.println(initialPitch);
+}
+
+void loop() {
+  /* ---------- Ultrasonic Logic ---------- */
+  digitalWrite(trigPin, LOW);
+  delayMicroseconds(2);
+  digitalWrite(trigPin, HIGH);
+  delayMicroseconds(10);
+  digitalWrite(trigPin, LOW);
+
+  duration = pulseIn(echoPin, HIGH, 30000);
+  distance = duration * 0.034 / 2;
+
+  if (distance > 0 && distance <= triggerDistance && !triggered) {
+    triggered = true;
+
+    if (!at90) {
+      myServo.write(servoPos90);
+      at90 = true;
+    } else {
+      myServo.write(servoPos0);
+      at90 = false;
+    }
+
+    delay(500);
+  }
+
+  if (distance > triggerDistance + 10) {
+    triggered = false;
+  }
+
+  /* ---------- MPU6050 Update ---------- */
+  mpu.update();
+
+  float roll = mpu.getAngleX();
+  float pitch = mpu.getAngleY();
+
+  /* ---------- Pitch Correction (Motor A) ---------- */
+  if (pitch > initialPitch + 20) {
+    // Tilted forward too much → run Motor A
+    digitalWrite(MA_IN1, HIGH);
+    digitalWrite(MA_IN2, LOW);
+    analogWrite(MA_EN, 255);
+  } 
+  else {
+    // Within safe range → stop Motor A
+    analogWrite(MA_EN, 0);
+  }
+
+/* ---------- Roll Correction (Motor B & C) ---------- */
+if (roll > initialRoll + 20) {
+  digitalWrite(MB_IN1, HIGH);
+  digitalWrite(MB_IN2, LOW);
+  analogWrite(MB_EN, 255);
+
+  // Ensure Motor C off
+  digitalWrite(MC_IN3, LOW);
+  digitalWrite(MC_IN4, LOW);
+  analogWrite(MC_EN, 0);
+}
+else if (roll < initialRoll - 20) {
+  digitalWrite(MC_IN3, HIGH);
+  digitalWrite(MC_IN4, LOW);
+  analogWrite(MC_EN, 255);
+
+  // Ensure Motor B off
+  digitalWrite(MB_IN1, LOW);
+  digitalWrite(MB_IN2, LOW);
+  analogWrite(MB_EN, 0);
+}
+else {
+  // Within safe range → stop both
+  digitalWrite(MB_IN1, LOW);
+  digitalWrite(MB_IN2, LOW);
+  analogWrite(MB_EN, 0);
+
+  digitalWrite(MC_IN3, LOW);
+  digitalWrite(MC_IN4, LOW);
+  analogWrite(MC_EN, 0);
+}
+
+  /* ---------- Serial Output ---------- */
+  if (millis() - timer > 100) {
+    Serial.print("Roll: ");
+    Serial.print(roll);
+    Serial.print(" | Pitch: ");
+    Serial.print(pitch);
+    Serial.print(" | Yaw: ");
+    Serial.println(mpu.getAngleZ());
+
+    timer = millis();
+  }
+
+  delay(20);
+}
