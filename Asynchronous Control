@@ -1,0 +1,194 @@
+#include <Servo.h>
+#include <Wire.h>
+#include <MPU6050_light.h>
+
+// Ultrasonic + Servo
+const int trigPin = 13;
+const int echoPin = 12;
+const int servoPin = 11;
+
+Servo myServo;
+
+long duration;
+int distance;
+
+bool triggered = false;
+bool at90 = false;
+
+const int servoPos0 = 0;
+const int servoPos90 = 90;
+const int triggerDistance = 100; // cm
+
+// MPU6050
+MPU6050 mpu(Wire);
+unsigned long timer = 0;
+
+float initialRoll = 0;
+float initialPitch = 0;
+
+// ESCs
+// A & B = Pitch
+// C & D = Roll
+Servo escA;   // Pitch +
+Servo escB;   // Pitch -
+Servo escC;   // Roll +
+Servo escD;   // Roll -
+
+const int ESC_A_PIN = 3;
+const int ESC_B_PIN = 10;
+const int ESC_C_PIN = 5;
+const int ESC_D_PIN = 6;
+
+// ESC Signal Values
+// ESC_MAX controls violence 
+const int ESC_MIN = 1000;
+const int ESC_MAX = 1600; 
+
+// Control Tuning 
+// KP controls strength
+// Deadband controls calmness 
+const float KP = 10.0; 
+const float DEADBAND = 2.5; 
+
+void setup() {
+
+  // Ultrasonic
+  pinMode(trigPin, OUTPUT);
+  pinMode(echoPin, INPUT);
+
+  // Servo
+  myServo.attach(servoPin);
+  myServo.write(servoPos0);
+
+  // ESCs
+  escA.attach(ESC_A_PIN);
+  escB.attach(ESC_B_PIN);
+  escC.attach(ESC_C_PIN);
+  escD.attach(ESC_D_PIN);
+
+  // Arm ESCs
+  escA.writeMicroseconds(ESC_MIN);
+  escB.writeMicroseconds(ESC_MIN);
+  escC.writeMicroseconds(ESC_MIN);
+  escD.writeMicroseconds(ESC_MIN);
+
+  Serial.begin(115200);
+  Wire.begin();
+
+  // MPU6050 init
+  if (mpu.begin() != 0) {
+    Serial.println("MPU6050 not connected!");
+    while (1);
+  }
+
+  Serial.println("Calibrating MPU6050... Keep it still");
+  delay(1000);
+  mpu.calcGyroOffsets();
+  Serial.println("Calibration done!");
+
+  delay(1000);
+  mpu.update();
+
+  // Store initial orientation
+  initialRoll  = mpu.getAngleX();
+  initialPitch = mpu.getAngleY();
+
+  Serial.print("Initial Roll: ");
+  Serial.println(initialRoll);
+  Serial.print("Initial Pitch: ");
+  Serial.println(initialPitch);
+
+  // Allow ESCs to finish arming
+  delay(2000);
+}
+
+void loop() {
+
+  // Ultrasonic Logic
+  digitalWrite(trigPin, LOW);
+  delayMicroseconds(2);
+  digitalWrite(trigPin, HIGH);
+  delayMicroseconds(10);
+  digitalWrite(trigPin, LOW);
+
+  duration = pulseIn(echoPin, HIGH, 30000);
+  distance = duration * 0.034 / 2;
+
+  if (distance > 0 && distance <= triggerDistance && !triggered) {
+    triggered = true;
+
+    if (!at90) {
+      myServo.write(servoPos90);
+      at90 = true;
+    } else {
+      myServo.write(servoPos0);
+      at90 = false;
+    }
+
+    delay(500);
+  }
+
+  if (distance > triggerDistance + 10) {
+    triggered = false;
+  }
+
+  // MPU6050 Update
+  mpu.update();
+
+  float roll  = mpu.getAngleX();
+  float pitch = mpu.getAngleY();
+
+  float rollError  = roll  - initialRoll;
+  float pitchError = pitch - initialPitch;
+
+  // Deadband
+  if (abs(rollError)  < DEADBAND) rollError  = 0;
+  if (abs(pitchError) < DEADBAND) pitchError = 0;
+
+  // Pitch Control
+  int pitchCorrection = abs(pitchError) * KP;
+  pitchCorrection = constrain(pitchCorrection, 0, ESC_MAX - ESC_MIN);
+
+  if (pitchError > 0) {
+    escA.writeMicroseconds(ESC_MIN + pitchCorrection);
+    escB.writeMicroseconds(ESC_MIN);
+  }
+  else if (pitchError < 0) {
+    escB.writeMicroseconds(ESC_MIN + pitchCorrection);
+    escA.writeMicroseconds(ESC_MIN);
+  }
+  else {
+    escA.writeMicroseconds(ESC_MIN);
+    escB.writeMicroseconds(ESC_MIN);
+  }
+
+  // Roll Control
+  int rollCorrection = abs(rollError) * KP;
+  rollCorrection = constrain(rollCorrection, 0, ESC_MAX - ESC_MIN);
+
+  if (rollError > 0) {
+    escC.writeMicroseconds(ESC_MIN + rollCorrection);
+    escD.writeMicroseconds(ESC_MIN);
+  }
+  else if (rollError < 0) {
+    escD.writeMicroseconds(ESC_MIN + rollCorrection);
+    escC.writeMicroseconds(ESC_MIN);
+  }
+  else {
+    escC.writeMicroseconds(ESC_MIN);
+    escD.writeMicroseconds(ESC_MIN);
+  }
+
+  // Serial Output
+  if (millis() - timer > 100) {
+    Serial.print("Roll: ");
+    Serial.print(roll);
+    Serial.print(" | Pitch: ");
+    Serial.print(pitch);
+    Serial.print(" | Yaw: ");
+    Serial.println(mpu.getAngleZ());
+    timer = millis();
+  }
+
+  delay(20);
+}
