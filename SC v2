@@ -1,0 +1,204 @@
+#include <Servo.h>
+#include <Wire.h>
+#include <MPU6050_light.h>
+
+// Ultrasonic + Servo
+const int trigPin = 13;
+const int echoPin = 12;
+const int servoPin = 11;
+
+Servo myServo;
+
+long duration;
+int distance;
+
+bool triggered = false;
+bool rotateCW = true;
+
+// Continuous-rotation servo values (tune if needed)
+const int SERVO_STOP = 92;   // neutral / stop
+const int SERVO_CW   = 120;  // clockwise
+const int SERVO_CCW  = 60;   // counter-clockwise
+const int triggerDistance = 5; // cm
+
+// Time to rotate (controls angle)
+const unsigned long SERVO_MOVE_TIME = 400; // ms
+
+// MPU6050
+MPU6050 mpu(Wire);
+unsigned long timer = 0;
+
+float initialRoll = 0;
+float initialPitch = 0;
+
+// ESCs
+// A & B = Pitch
+// C & D = Roll
+Servo escA;   // Pitch motor 1
+Servo escB;   // Pitch motor 2
+Servo escC;   // Roll motor 1
+Servo escD;   // Roll motor 2
+
+const int ESC_A_PIN = 3;
+const int ESC_B_PIN = 10;
+const int ESC_C_PIN = 5;
+const int ESC_D_PIN = 6;
+
+// ESC Signal Values
+// ESC_MIN = neutral, ESC_MAX = full throttle
+const int ESC_MIN = 1500; // neutral for bidirectional ESC
+const int ESC_MAX = 1900; 
+const int ESC_MIN_REV = 1100; // full reverse
+
+// Control Tuning
+const float KP = 10.0; 
+const float DEADBAND = 2.5; 
+
+void setup() {
+
+  // Ultrasonic
+  pinMode(trigPin, OUTPUT);
+  pinMode(echoPin, INPUT);
+
+  // Servo
+  myServo.attach(servoPin);
+  myServo.write(SERVO_STOP);
+
+  // ESCs
+  escA.attach(ESC_A_PIN);
+  escB.attach(ESC_B_PIN);
+  escC.attach(ESC_C_PIN);
+  escD.attach(ESC_D_PIN);
+
+  // Arm ESCs at neutral
+  escA.writeMicroseconds(ESC_MIN);
+  escB.writeMicroseconds(ESC_MIN);
+  escC.writeMicroseconds(ESC_MIN);
+  escD.writeMicroseconds(ESC_MIN);
+
+  Serial.begin(115200);
+  Wire.begin();
+
+  // MPU6050 init
+  if (mpu.begin() != 0) {
+    Serial.println("MPU6050 not connected!");
+    while (1);
+  }
+
+  Serial.println("Calibrating MPU6050... Keep it still");
+  delay(1000);
+  mpu.calcGyroOffsets();
+  Serial.println("Calibration done!");
+
+  delay(1000);
+  mpu.update();
+
+  // Store initial orientation
+  initialRoll  = mpu.getAngleX();
+  initialPitch = mpu.getAngleY();
+
+  Serial.print("Initial Roll: ");
+  Serial.println(initialRoll);
+  Serial.print("Initial Pitch: ");
+  Serial.println(initialPitch);
+
+  // Allow ESCs to finish arming
+  delay(2000);
+}
+
+void loop() {
+
+  // Ultrasonic Logic
+  digitalWrite(trigPin, LOW);
+  delayMicroseconds(2);
+  digitalWrite(trigPin, HIGH);
+  delayMicroseconds(10);
+  digitalWrite(trigPin, LOW);
+
+  duration = pulseIn(echoPin, HIGH, 30000);
+  distance = duration * 0.034 / 2;
+
+  /* ---------- Trigger Logic ---------- */
+  if (distance > 0 && distance <= triggerDistance && !triggered) {
+    triggered = true;
+
+    if (rotateCW) {
+      myServo.write(SERVO_CW);
+      delay(SERVO_MOVE_TIME);
+      myServo.write(SERVO_STOP);
+      rotateCW = false;
+    } else {
+      myServo.write(SERVO_CCW);
+      delay(SERVO_MOVE_TIME);
+      myServo.write(SERVO_STOP);
+      rotateCW = true;
+    }
+  }
+
+  // Reset trigger when object moves away
+  if (distance > triggerDistance + 10) {
+    triggered = false;
+  }
+
+  // MPU6050 Update
+  mpu.update();
+
+  float roll  = mpu.getAngleX();
+  float pitch = mpu.getAngleY();
+
+  float rollError  = roll  - initialRoll;
+  float pitchError = pitch - initialPitch;
+
+  // Deadband  
+  if (abs(rollError)  < DEADBAND) rollError  = 0;
+  if (abs(pitchError) < DEADBAND) pitchError = 0;
+
+  // Pitch Control
+  int pitchCorrection = abs(pitchError) * KP;
+  pitchCorrection = constrain(pitchCorrection, 0, ESC_MAX - ESC_MIN);
+
+  int pitchSignal;
+  if (pitchError > 0) {
+    // Over-correction → both motors forward
+    pitchSignal = ESC_MIN + pitchCorrection;
+  } else if (pitchError < 0) {
+    // Under-correction → both motors reverse
+    pitchSignal = ESC_MIN - pitchCorrection;
+  } else {
+    pitchSignal = ESC_MIN;
+  }
+
+  escA.writeMicroseconds(pitchSignal);
+  escB.writeMicroseconds(pitchSignal);
+
+  // Roll Control
+  int rollCorrection = abs(rollError) * KP;
+  rollCorrection = constrain(rollCorrection, 0, ESC_MAX - ESC_MIN);
+
+  int rollSignal;
+  if (rollError > 0) {
+    rollSignal = ESC_MIN + rollCorrection; // CW
+  } else if (rollError < 0) {
+    rollSignal = ESC_MIN - rollCorrection; // CCW
+  } else {
+    rollSignal = ESC_MIN;
+  }
+
+  escC.writeMicroseconds(rollSignal);
+  escD.writeMicroseconds(rollSignal);
+
+  // Output Test
+  if (millis() - timer > 100) {
+    Serial.print("Distance (cm): ");
+    Serial.print(distance);
+    Serial.print(" | Roll: ");
+    Serial.print(roll);
+    Serial.print(" | Pitch: ");
+    Serial.print(pitch);
+    Serial.print(" | Yaw: ");
+    Serial.println(mpu.getAngleZ());
+    timer = millis();
+  }
+
+  delay(20);
+}
