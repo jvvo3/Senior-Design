@@ -81,21 +81,34 @@ void setup() {
 
   // MPU6050 init
   if (mpu.begin() != 0) {
-    Serial.println("MPU6050 not connected!");
-    while (1);
-  }
+    Serial.println("MPU6050 not connected! Continuing without it.");
+  // Skip MPU functionality
+} else {
+    Serial.println("MPU6050 connected, calibrating...");
+    delay(1000);
+    mpu.calcGyroOffsets();
+    Serial.println("Calibration done!");
+    delay(1000);
+    mpu.update();
+    initialRoll  = mpu.getAngleX();
+    initialPitch = mpu.getAngleY();
+}
+  // if (mpu.begin() != 0) {
+  //   Serial.println("MPU6050 not connected!");
+  //   while (1);
+  // }
 
-  Serial.println("Calibrating MPU6050... Keep it still");
-  delay(1000);
-  mpu.calcGyroOffsets();
-  Serial.println("Calibration done!");
+  // Serial.println("Calibrating MPU6050... Keep it still");
+  // delay(1000);
+  // mpu.calcGyroOffsets();
+  // Serial.println("Calibration done!");
 
-  delay(1000);
-  mpu.update();
+  // delay(1000);
+  // mpu.update();
 
-  // Store initial orientation
-  initialRoll  = mpu.getAngleX();
-  initialPitch = mpu.getAngleY();
+  // // Store initial orientation
+  // initialRoll  = mpu.getAngleX();
+  // initialPitch = mpu.getAngleY();
 
   Serial.print("Initial Roll: ");
   Serial.println(initialRoll);
