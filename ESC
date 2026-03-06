@@ -13,21 +13,22 @@ const int ESC_B_PIN = 10;
 const int ESC_C_PIN = 5;
 const int ESC_D_PIN = 6;
 
-const int ESC_MIN = 1500;
-const int ESC_MAX = 1900;
-const int ESC_MIN_REV = 1100;
+const int ESC_ARM_SIGNAL = 1000;  // arming 
+const int ESC_MIN = 1500;         // reverse
+const int ESC_MAX = 1900;         // forward
+const int ESC_STOP = 1100;        // stop
 
 void setup() {
 
-  escA.attach(ESC_A_PIN);
-  escB.attach(ESC_B_PIN);
-  escC.attach(ESC_C_PIN);
-  escD.attach(ESC_D_PIN);
+  escA.attach(ESC_A_PIN, ESC_MIN, ESC_MAX);
+  escB.attach(ESC_B_PIN, ESC_MIN, ESC_MAX);
+  escC.attach(ESC_C_PIN, ESC_MIN, ESC_MAX);
+  escD.attach(ESC_D_PIN, ESC_MIN, ESC_MAX);
 
-  escA.writeMicroseconds(ESC_MIN);
-  escB.writeMicroseconds(ESC_MIN);
-  escC.writeMicroseconds(ESC_MIN);
-  escD.writeMicroseconds(ESC_MIN);
+  escA.writeMicroseconds(ESC_ARM_SIGNAL);
+  escB.writeMicroseconds(ESC_ARM_SIGNAL);
+  escC.writeMicroseconds(ESC_ARM_SIGNAL);
+  escD.writeMicroseconds(ESC_ARM_SIGNAL);
 
   Serial.begin(115200);
 
@@ -36,13 +37,31 @@ void setup() {
 
 void loop() {
 
-  // Example constant signals (motors idle)
+  Serial.println("ESCs running at idle");
+  escA.writeMicroseconds(ESC_STOP);
+  escB.writeMicroseconds(ESC_STOP);
+  escC.writeMicroseconds(ESC_STOP);
+  escD.writeMicroseconds(ESC_STOP);
+  delay(4000);
+
+  Serial.println("ESCs running CW");
+  escA.writeMicroseconds(ESC_MAX);
+  escB.writeMicroseconds(ESC_MAX);
+  escC.writeMicroseconds(ESC_MAX);
+  escD.writeMicroseconds(ESC_MAX);
+  delay(4000);
+
+  Serial.println("ESCs running idle");
+  escA.writeMicroseconds(ESC_STOP);
+  escB.writeMicroseconds(ESC_STOP);
+  escC.writeMicroseconds(ESC_STOP);
+  escD.writeMicroseconds(ESC_STOP);
+  delay(4000);
+
+  Serial.println("ESCs running CCW");
   escA.writeMicroseconds(ESC_MIN);
   escB.writeMicroseconds(ESC_MIN);
   escC.writeMicroseconds(ESC_MIN);
   escD.writeMicroseconds(ESC_MIN);
-
-  Serial.println("ESCs running at idle signal");
-
-  delay(100);
+  delay(4000);
 }
