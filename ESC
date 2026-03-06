@@ -1,0 +1,48 @@
+#include <Servo.h>
+
+// ESCs
+// A & B for Pitch
+// C & D for Roll
+Servo escA;
+Servo escB;
+Servo escC;
+Servo escD;
+
+const int ESC_A_PIN = 3;
+const int ESC_B_PIN = 10;
+const int ESC_C_PIN = 5;
+const int ESC_D_PIN = 6;
+
+const int ESC_MIN = 1500;
+const int ESC_MAX = 1900;
+const int ESC_MIN_REV = 1100;
+
+void setup() {
+
+  escA.attach(ESC_A_PIN);
+  escB.attach(ESC_B_PIN);
+  escC.attach(ESC_C_PIN);
+  escD.attach(ESC_D_PIN);
+
+  escA.writeMicroseconds(ESC_MIN);
+  escB.writeMicroseconds(ESC_MIN);
+  escC.writeMicroseconds(ESC_MIN);
+  escD.writeMicroseconds(ESC_MIN);
+
+  Serial.begin(115200);
+
+  delay(2000);
+}
+
+void loop() {
+
+  // Example constant signals (motors idle)
+  escA.writeMicroseconds(ESC_MIN);
+  escB.writeMicroseconds(ESC_MIN);
+  escC.writeMicroseconds(ESC_MIN);
+  escD.writeMicroseconds(ESC_MIN);
+
+  Serial.println("ESCs running at idle signal");
+
+  delay(100);
+}
