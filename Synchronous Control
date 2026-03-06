@@ -13,11 +13,20 @@ long duration;
 int distance;
 
 bool triggered = false;
-bool at90 = false;
+bool rotateCW = true;
 
-const int servoPos0 = 0;
-const int servoPos90 = 90;
-const int triggerDistance = 100; // cm
+// Continuous-rotation servo values
+const int SERVO_STOP = 91;
+const int SERVO_CW   = 120;
+const int SERVO_CCW  = 60;
+
+const int triggerDistance = 15; // cm
+const unsigned long SERVO_MOVE_TIME = 400; // ms
+
+// Wave detection variables
+int previousDistance = 0;
+bool nearDetected = false;
+const int waveIncrease = 100; // cm increase required to count as wave
 
 // MPU6050
 MPU6050 mpu(Wire);
@@ -27,45 +36,39 @@ float initialRoll = 0;
 float initialPitch = 0;
 
 // ESCs
-// A & B = Pitch
-// C & D = Roll
-Servo escA;   // Pitch motor 1
-Servo escB;   // Pitch motor 2
-Servo escC;   // Roll motor 1
-Servo escD;   // Roll motor 2
+// A & B for Pitch
+// C & D for Roll
+Servo escA;
+Servo escB;
+Servo escC;
+Servo escD;
 
 const int ESC_A_PIN = 3;
 const int ESC_B_PIN = 10;
 const int ESC_C_PIN = 5;
 const int ESC_D_PIN = 6;
 
-// ESC Signal Values
-// ESC_MIN = neutral, ESC_MAX = full throttle
-const int ESC_MIN = 1500; // neutral for bidirectional ESC
-const int ESC_MAX = 1900; 
-const int ESC_MIN_REV = 1100; // full reverse
+const int ESC_MIN = 1500;
+const int ESC_MAX = 1900;
+const int ESC_MIN_REV = 1100;
 
 // Control Tuning
-const float KP = 10.0; 
-const float DEADBAND = 2.5; 
+const float KP = 10.0;
+const float DEADBAND = 2.5;
 
 void setup() {
 
-  // Ultrasonic
   pinMode(trigPin, OUTPUT);
   pinMode(echoPin, INPUT);
 
-  // Servo
   myServo.attach(servoPin);
-  myServo.write(servoPos0);
+  myServo.write(SERVO_STOP);
 
-  // ESCs
   escA.attach(ESC_A_PIN);
   escB.attach(ESC_B_PIN);
   escC.attach(ESC_C_PIN);
   escD.attach(ESC_D_PIN);
 
-  // Arm ESCs at neutral
   escA.writeMicroseconds(ESC_MIN);
   escB.writeMicroseconds(ESC_MIN);
   escC.writeMicroseconds(ESC_MIN);
@@ -74,36 +77,31 @@ void setup() {
   Serial.begin(115200);
   Wire.begin();
 
-  // MPU6050 init
   if (mpu.begin() != 0) {
-    Serial.println("MPU6050 not connected!");
-    while (1);
+    Serial.println("IMU not connected! Continuing without it.");
+  } 
+  else {
+    Serial.println("IMU connected, calibrating...");
+    delay(1000);
+    mpu.calcGyroOffsets();
+    Serial.println("Calibration done!");
+    delay(1000);
+    mpu.update();
+    initialRoll  = mpu.getAngleX();
+    initialPitch = mpu.getAngleY();
   }
-
-  Serial.println("Calibrating MPU6050... Keep it still");
-  delay(1000);
-  mpu.calcGyroOffsets();
-  Serial.println("Calibration done!");
-
-  delay(1000);
-  mpu.update();
-
-  // Store initial orientation
-  initialRoll  = mpu.getAngleX();
-  initialPitch = mpu.getAngleY();
 
   Serial.print("Initial Roll: ");
   Serial.println(initialRoll);
   Serial.print("Initial Pitch: ");
   Serial.println(initialPitch);
 
-  // Allow ESCs to finish arming
   delay(2000);
 }
 
 void loop() {
 
-  // Ultrasonic Logic
+  // Ultrasonic Measurement
   digitalWrite(trigPin, LOW);
   delayMicroseconds(2);
   digitalWrite(trigPin, HIGH);
@@ -113,23 +111,38 @@ void loop() {
   duration = pulseIn(echoPin, HIGH, 30000);
   distance = duration * 0.034 / 2;
 
-  if (distance > 0 && distance <= triggerDistance && !triggered) {
-    triggered = true;
+  /* ---------- Wave Trigger Logic ---------- */
 
-    if (!at90) {
-      myServo.write(servoPos90);
-      at90 = true;
-    } else {
-      myServo.write(servoPos0);
-      at90 = false;
-    }
-
-    delay(500);
+  // Detect when object comes close
+  if (distance > 0 && distance <= triggerDistance) {
+    nearDetected = true;
   }
 
-  if (distance > triggerDistance + 10) {
+  // Detect quick move away
+  if (nearDetected && (distance - previousDistance) > waveIncrease && !triggered) {
+
+    triggered = true;
+    nearDetected = false;
+
+    if (rotateCW) {
+      myServo.write(SERVO_CW);
+      delay(SERVO_MOVE_TIME);
+      myServo.write(SERVO_STOP);
+      rotateCW = false;
+    } 
+    else {
+      myServo.write(SERVO_CCW);
+      delay(SERVO_MOVE_TIME);
+      myServo.write(SERVO_STOP);
+      rotateCW = true;
+    }
+  }
+
+  // Reset system once object is far away
+  if (distance > triggerDistance + 15) {
     triggered = false;
   }
+  previousDistance = distance;
 
   // MPU6050 Update
   mpu.update();
@@ -140,8 +153,7 @@ void loop() {
   float rollError  = roll  - initialRoll;
   float pitchError = pitch - initialPitch;
 
-  // Deadband  
-  if (abs(rollError)  < DEADBAND) rollError  = 0;
+  if (abs(rollError) < DEADBAND) rollError = 0;
   if (abs(pitchError) < DEADBAND) pitchError = 0;
 
   // Pitch Control
@@ -149,13 +161,14 @@ void loop() {
   pitchCorrection = constrain(pitchCorrection, 0, ESC_MAX - ESC_MIN);
 
   int pitchSignal;
+
   if (pitchError > 0) {
-    // Over-correction → both motors forward
     pitchSignal = ESC_MIN + pitchCorrection;
-  } else if (pitchError < 0) {
-    // Under-correction → both motors reverse
+  } 
+  else if (pitchError < 0) {
     pitchSignal = ESC_MIN - pitchCorrection;
-  } else {
+  } 
+  else {
     pitchSignal = ESC_MIN;
   }
 
@@ -167,27 +180,29 @@ void loop() {
   rollCorrection = constrain(rollCorrection, 0, ESC_MAX - ESC_MIN);
 
   int rollSignal;
+
   if (rollError > 0) {
-    rollSignal = ESC_MIN + rollCorrection; // CW
-  } else if (rollError < 0) {
-    rollSignal = ESC_MIN - rollCorrection; // CCW
-  } else {
+    rollSignal = ESC_MIN + rollCorrection;
+  } 
+  else if (rollError < 0) {
+    rollSignal = ESC_MIN - rollCorrection;
+  } 
+  else {
     rollSignal = ESC_MIN;
   }
 
   escC.writeMicroseconds(rollSignal);
   escD.writeMicroseconds(rollSignal);
 
-  // Output Test
+  // Serial Output
   if (millis() - timer > 100) {
-    Serial.print("Roll: ");
+    Serial.print("Distance (cm): ");
+    Serial.print(distance);
+    Serial.print(" | Roll: ");
     Serial.print(roll);
     Serial.print(" | Pitch: ");
-    Serial.print(pitch);
-    Serial.print(" | Yaw: ");
-    Serial.println(mpu.getAngleZ());
+    Serial.println(pitch);
     timer = millis();
   }
-
   delay(20);
 }
