@@ -14,9 +14,9 @@ const int ESC_C_PIN = 5;
 const int ESC_D_PIN = 6;
 
 const int ESC_ARM_SIGNAL = 1000;  // arming 
-const int ESC_MIN = 1500;         // reverse
-const int ESC_MAX = 1900;         // forward
-const int ESC_STOP = 1100;        // stop
+const int ESC_MIN = 1006;         // reverse
+const int ESC_MAX = 2006;         // forward
+const int ESC_STOP = 1502;        // stop
 
 void setup() {
 
