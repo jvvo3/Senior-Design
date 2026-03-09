@@ -18,7 +18,7 @@ Servo myServo;
 const int SERVO_STOP = 91;  // neutral / stop
 const int SERVO_CW   = 120; // clockwise
 const int SERVO_CCW  = 60;  // counter-clockwise
-const unsigned long SERVO_MOVE_TIME = 400; // ms
+const unsigned long SERVO_MOVE_TIME = 250; // ms
 
 // Ultrasonic
 long duration;
@@ -30,7 +30,7 @@ int previousDistance = 0;
 bool nearDetected = false;
 bool triggered = false;
 bool rotateCW = true;
-const int waveIncrease = 100; // cm increase required to count as wave
+const int waveIncrease = 30; // cm increase required to count as wave
 
 // MPU6050
 MPU6050 mpu(Wire);
@@ -157,7 +157,7 @@ void loop() {
   delayMicroseconds(10);
   digitalWrite(trigPin, LOW);
 
-  duration = pulseIn(echoPin, HIGH, 30000);
+  duration = pulseIn(echoPin, HIGH, 100000);
   distance = duration * 0.034 / 2;
 
   // Handwave Trigger Logic
@@ -217,8 +217,8 @@ void loop() {
 
   // Serial Output
   if (millis() - timer > 100) {
-    Serial.print("Distance (cm): "); Serial.print(distance);
-    Serial.print(" | Roll: "); Serial.print(roll);
+    // Serial.print("Distance (cm): "); Serial.println(distance);
+    Serial.print("Roll: "); Serial.print(roll);
     Serial.print(" | Pitch: "); Serial.println(pitch);
     timer = millis();
   }
