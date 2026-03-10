@@ -23,7 +23,7 @@ const unsigned long SERVO_MOVE_TIME = 250;
 // Ultrasonic
 long duration;
 int distance;
-const int triggerDistance = 15;
+const int triggerDistance = 20;
 
 // Handwave detection
 int previousDistance = 0;
@@ -46,8 +46,8 @@ const int ESC_STOP = 1500;  // Neutral / Stop
 const int ESC_DEADBAND = 50; // 1450–1550
 
 // Control tuning
-const float KP = 10.0;
-const float DEADBAND = 2.5;
+const float KP = 3.0; // 10.0
+const float DEADBAND = 5.0; // 2.5
 
 // Power Button
 bool systemOn = false;
@@ -57,7 +57,6 @@ const unsigned long debounceDelay = 50;
 
 // Timer
 unsigned long timer = 0;
-
 
 // Function to apply ESC deadband
 int applyDeadband(int signal)
@@ -70,7 +69,6 @@ int applyDeadband(int signal)
 
   return constrain(signal, ESC_MIN, ESC_MAX);
 }
-
 
 // System Start
 void systemStart() {
@@ -224,14 +222,19 @@ void loop() {
   float roll  = mpu.getAngleX();
   float pitch = mpu.getAngleY();
 
-  float rollError  = roll  - initialRoll;
+  float rollError = roll - initialRoll;
   float pitchError = pitch - initialPitch;
 
+  // Deadband behavior
+  // Smoother response instead of jumping immediately once out of deadband
   if (abs(rollError) < DEADBAND)
     rollError = 0;
-
+  else
+    rollError -= DEADBAND * (rollError > 0 ? 1 : -1);
   if (abs(pitchError) < DEADBAND)
     pitchError = 0;
+  else
+    pitchError -= DEADBAND * (pitchError > 0 ? 1 : -1);
 
 
   // Pitch Control
