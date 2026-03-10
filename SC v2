@@ -9,28 +9,28 @@ const int servoPin = 11;
 const int POWER_BUTTON_PIN = 2;
 
 const int ESC_A_PIN = 3;
-const int ESC_B_PIN = 10;
+const int ESC_B_PIN = 6;
 const int ESC_C_PIN = 5;
-const int ESC_D_PIN = 6;
+const int ESC_D_PIN = 9;
 
 // Servo
 Servo myServo;
-const int SERVO_STOP = 91;  // neutral / stop
-const int SERVO_CW   = 120; // clockwise
-const int SERVO_CCW  = 60;  // counter-clockwise
-const unsigned long SERVO_MOVE_TIME = 250; // ms
+const int SERVO_STOP = 91;
+const int SERVO_CW   = 120;
+const int SERVO_CCW  = 60;
+const unsigned long SERVO_MOVE_TIME = 250;
 
 // Ultrasonic
 long duration;
 int distance;
-const int triggerDistance = 15; // cm
+const int triggerDistance = 15;
 
 // Handwave detection
 int previousDistance = 0;
 bool nearDetected = false;
 bool triggered = false;
 bool rotateCW = true;
-const int waveIncrease = 30; // cm increase required to count as wave
+const int waveIncrease = 20;
 
 // MPU6050
 MPU6050 mpu(Wire);
@@ -39,9 +39,11 @@ float initialPitch = 0;
 
 // ESCs
 Servo escA, escB, escC, escD;
-const int ESC_MIN = 1500;
-const int ESC_MAX = 1900;
-const int ESC_MIN_REV = 1100;
+
+const int ESC_MAX = 2000;   // Full throttle CW
+const int ESC_MIN = 1000;   // Full throttle CCW
+const int ESC_STOP = 1500;  // Neutral / Stop
+const int ESC_DEADBAND = 50; // 1450–1550
 
 // Control tuning
 const float KP = 10.0;
@@ -49,54 +51,69 @@ const float DEADBAND = 2.5;
 
 // Power Button
 bool systemOn = false;
-bool lastButtonState = HIGH; // Pull-up HIGH = not pressed
+bool lastButtonState = HIGH;
 unsigned long lastDebounceTime = 0;
-const unsigned long debounceDelay = 50; // ms
+const unsigned long debounceDelay = 50;
 
 // Timer
 unsigned long timer = 0;
 
-// Functions
+
+// Function to apply ESC deadband
+int applyDeadband(int signal)
+{
+  if(signal > ESC_STOP && signal < ESC_STOP + ESC_DEADBAND)
+    signal = ESC_STOP + ESC_DEADBAND;
+
+  if(signal < ESC_STOP && signal > ESC_STOP - ESC_DEADBAND)
+    signal = ESC_STOP - ESC_DEADBAND;
+
+  return constrain(signal, ESC_MIN, ESC_MAX);
+}
+
+
+// System Start
 void systemStart() {
+
   Serial.println("Power ON: Initializing system...");
 
-  // Reset wave detection
   previousDistance = 0;
   nearDetected = false;
   triggered = false;
   rotateCW = true;
 
-  // Reset MPU6050
+  // MPU6050 init
   if (mpu.begin() != 0) {
     Serial.println("IMU not connected! Continuing without it.");
   } else {
-    Serial.println("IMU connected, calibrating...");
+
     delay(1000);
     mpu.calcGyroOffsets();
     Serial.println("Calibration done!");
+
     delay(1000);
+
     mpu.update();
     initialRoll  = mpu.getAngleX();
     initialPitch = mpu.getAngleY();
   }
 
-  // Reset ESCs
-  escA.writeMicroseconds(ESC_MIN);
-  escB.writeMicroseconds(ESC_MIN);
-  escC.writeMicroseconds(ESC_MIN);
-  escD.writeMicroseconds(ESC_MIN);
+  // ESC Reset
+  escA.writeMicroseconds(ESC_STOP);
+  escB.writeMicroseconds(ESC_STOP);
+  escC.writeMicroseconds(ESC_STOP);
+  escD.writeMicroseconds(ESC_STOP);
 
-  // Reset Servo
+  // Servo reset
   myServo.write(SERVO_STOP);
 
-  Serial.print("Initial Roll: "); Serial.println(initialRoll);
-  Serial.print("Initial Pitch: "); Serial.println(initialPitch);
-
-  delay(500); // Small delay to stabilize
+  delay(500);
 }
+
 
 // Setup
 void setup() {
+
   pinMode(trigPin, OUTPUT);
   pinMode(echoPin, INPUT);
   pinMode(POWER_BUTTON_PIN, INPUT_PULLUP);
@@ -112,67 +129,82 @@ void setup() {
   Serial.begin(115200);
   Wire.begin();
 
-  // Initially OFF
   Serial.println("System is OFF. Press button to power ON.");
 }
 
+
 // Main Loop
 void loop() {
-  // Power Button Handling
+
+  // Button Handling
   int reading = digitalRead(POWER_BUTTON_PIN);
 
-  if (reading != lastButtonState) {
+  if (reading != lastButtonState)
     lastDebounceTime = millis();
-  }
 
   if ((millis() - lastDebounceTime) > debounceDelay) {
+
     if (reading == LOW && !systemOn) {
+
       systemOn = true;
-      systemStart(); // Initialize everything fresh
+      systemStart();
       Serial.println("System Power ON");
-    } else if (reading == LOW && systemOn) {
+    }
+
+    else if (reading == LOW && systemOn) {
+
       systemOn = false;
       Serial.println("System Power OFF");
-      // Put motors in safe state
+
       myServo.write(SERVO_STOP);
-      escA.writeMicroseconds(ESC_MIN);
-      escB.writeMicroseconds(ESC_MIN);
-      escC.writeMicroseconds(ESC_MIN);
-      escD.writeMicroseconds(ESC_MIN);
+
+      escA.writeMicroseconds(ESC_STOP);
+      escB.writeMicroseconds(ESC_STOP);
+      escC.writeMicroseconds(ESC_STOP);
+      escD.writeMicroseconds(ESC_STOP);
     }
   }
 
   lastButtonState = reading;
 
-  // Run system only if powered ON
   if (!systemOn) {
     delay(50);
     return;
   }
 
-  // Ultrasonic Measurement
+
+  // Ultrasonic Trigger
   digitalWrite(trigPin, LOW);
   delayMicroseconds(2);
+
   digitalWrite(trigPin, HIGH);
   delayMicroseconds(10);
+
   digitalWrite(trigPin, LOW);
 
   duration = pulseIn(echoPin, HIGH, 100000);
   distance = duration * 0.034 / 2;
 
-  // Handwave Trigger Logic
-  if (distance > 0 && distance <= triggerDistance) nearDetected = true;
+
+  // Handwave Detection
+  if (distance > 0 && distance <= triggerDistance)
+    nearDetected = true;
 
   if (nearDetected && (distance - previousDistance) > waveIncrease && !triggered) {
+
     triggered = true;
     nearDetected = false;
 
     if (rotateCW) {
+
       myServo.write(SERVO_CW);
       delay(SERVO_MOVE_TIME);
       myServo.write(SERVO_STOP);
       rotateCW = false;
-    } else {
+    }
+
+    else {
+
       myServo.write(SERVO_CCW);
       delay(SERVO_MOVE_TIME);
       myServo.write(SERVO_STOP);
@@ -180,46 +212,68 @@ void loop() {
     }
   }
 
-  if (distance > triggerDistance + 15) triggered = false;
+  if (distance > triggerDistance + 15)
+    triggered = false;
+
   previousDistance = distance;
 
-  // MPU6050 Updating
+
+  // MPU Update
   mpu.update();
+
   float roll  = mpu.getAngleX();
   float pitch = mpu.getAngleY();
+
   float rollError  = roll  - initialRoll;
   float pitchError = pitch - initialPitch;
 
-  if (abs(rollError) < DEADBAND) rollError = 0;
-  if (abs(pitchError) < DEADBAND) pitchError = 0;
+  if (abs(rollError) < DEADBAND)
+    rollError = 0;
+
+  if (abs(pitchError) < DEADBAND)
+    pitchError = 0;
+
 
   // Pitch Control
   int pitchCorrection = abs(pitchError) * KP;
-  pitchCorrection = constrain(pitchCorrection, 0, ESC_MAX - ESC_MIN);
 
-  int pitchSignal = ESC_MIN;
-  if (pitchError > 0) pitchSignal = ESC_MIN + pitchCorrection;
-  else if (pitchError < 0) pitchSignal = ESC_MIN - pitchCorrection;
+  int pitchSignal = ESC_STOP;
+
+  if (pitchError > 0)
+    pitchSignal = ESC_STOP + pitchCorrection;
+
+  else if (pitchError < 0)
+    pitchSignal = ESC_STOP - pitchCorrection;
+
+  pitchSignal = applyDeadband(pitchSignal);
 
   escA.writeMicroseconds(pitchSignal);
   escB.writeMicroseconds(pitchSignal);
 
+
   // Roll Control
   int rollCorrection = abs(rollError) * KP;
-  rollCorrection = constrain(rollCorrection, 0, ESC_MAX - ESC_MIN);
 
-  int rollSignal = ESC_MIN;
-  if (rollError > 0) rollSignal = ESC_MIN + rollCorrection;
-  else if (rollError < 0) rollSignal = ESC_MIN - rollCorrection;
+  int rollSignal = ESC_STOP;
+
+  if (rollError > 0)
+    rollSignal = ESC_STOP + rollCorrection;
+
+  else if (rollError < 0)
+    rollSignal = ESC_STOP - rollCorrection;
+
+  rollSignal = applyDeadband(rollSignal);
 
   escC.writeMicroseconds(rollSignal);
   escD.writeMicroseconds(rollSignal);
 
+
   // Serial Output
   if (millis() - timer > 100) {
-    // Serial.print("Distance (cm): "); Serial.println(distance);
-    Serial.print("Roll: "); Serial.print(roll);
-    Serial.print(" | Pitch: "); Serial.println(pitch);
+
+    Serial.print("Distance (cm): "); Serial.println(distance);
+    // Serial.print(" | Roll: "); Serial.print(roll);
+    // Serial.print(" | Pitch: "); Serial.println(pitch);
     timer = millis();
   }
 
